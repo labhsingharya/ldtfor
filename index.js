@@ -1,6 +1,6 @@
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
-import { NewMessage } from "telegram/events";
+import { NewMessage } from "telegram/events/index.js";
 import axios from "axios";
 
 /* ================= ENV ================= */
