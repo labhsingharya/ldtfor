@@ -4,6 +4,7 @@ import { NewMessage } from "telegram/events/index.js";
 import axios from "axios";
 import express from "express";
 
+/* ================= DUMMY SERVER (Render Fix) ================= */
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -32,7 +33,7 @@ const EXCEPT_CHATS = [
 
 const KEYWORDS = ["loot", "fast", "grab"];
 const REPLACE_LINK = "https://t.me/Lootdealtricky";
-const CACHE_TIME = 30 * 60 * 1000; // 30 minutes
+const CACHE_TIME = 30 * 60 * 1000;
 
 /* ================= CACHE ================= */
 const urlCache = new Map();
@@ -40,18 +41,15 @@ const textCache = new Map();
 
 /* ================= HELPERS ================= */
 
-// Stylish / Unicode font → normal text
 function normalizeUnicodeFont(text = "") {
   return text.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
 }
 
-// Keyword check
 function hasKeyword(text = "") {
   const t = text.toLowerCase();
   return KEYWORDS.some(k => t.includes(k));
 }
 
-// Normalize text for duplicate topic check
 function normalizeText(text = "") {
   return text
     .toLowerCase()
@@ -61,7 +59,6 @@ function normalizeText(text = "") {
     .trim();
 }
 
-// Clean old cache entries
 function cleanCache() {
   const now = Date.now();
   for (const [k, v] of urlCache)
@@ -70,7 +67,6 @@ function cleanCache() {
     if (now - v > CACHE_TIME) textCache.delete(k);
 }
 
-// URL unshort
 async function unshortUrl(url) {
   try {
     const res = await axios.get(url, {
@@ -83,16 +79,12 @@ async function unshortUrl(url) {
   }
 }
 
-// Replace any Telegram name / link (stylish safe)
 function replaceTelegramLinks(text = "") {
   const t = normalizeUnicodeFont(text);
 
   return t
-    // t.me links
     .replace(/https?:\/\/t\.me\/[^\s]+/gi, REPLACE_LINK)
-    // @mentions
     .replace(/@[\w\d_]+/gi, REPLACE_LINK)
-    // channel name words (extra safety)
     .replace(/loot\s*deal\s*tricky/gi, REPLACE_LINK);
 }
 
@@ -113,15 +105,13 @@ function replaceTelegramLinks(text = "") {
       const msg = event.message;
       if (!msg || !msg.peerId) return;
 
-      // Get chat id
-      const chatId = msg.peerId.channelId
-        ? -100 + msg.peerId.channelId
-        : null;
+      const entity = await msg.getChat();
+      const chatId = entity?.id;
 
       if (!chatId) return;
-      if (EXCEPT_CHATS.includes(chatId)) return;
+      if (EXCEPT_CHATS.includes(Number(chatId))) return;
 
-      const rawText = msg.message || "";
+      const rawText = msg.message || msg.text || "";
       if (!hasKeyword(rawText)) return;
 
       cleanCache();
@@ -138,25 +128,39 @@ function replaceTelegramLinks(text = "") {
       const normalizedTopic = normalizeText(
         normalizeUnicodeFont(rawText)
       );
+
       if (textCache.has(normalizedTopic)) return;
       textCache.set(normalizedTopic, Date.now());
 
-      /* ---------- FINAL TEXT ---------- */
       const finalText = replaceTelegramLinks(rawText);
 
-      /* ---------- SEND ---------- */
+      /* ================= MEDIA FIX ================= */
       if (msg.media) {
-        await client.sendFile(TARGET_CHAT, {
-          file: msg.media,
-          caption: finalText
-        });
+
+        // Forward original message
+        const forwarded = await client.forwardMessages(
+          TARGET_CHAT,
+          {
+            messages: [msg.id],
+            fromPeer: entity
+          }
+        );
+
+        // Edit caption after forward (for link replace)
+        if (forwarded?.length && finalText !== rawText) {
+          await client.editMessage(TARGET_CHAT, {
+            message: forwarded[0].id,
+            text: finalText
+          });
+        }
+
       } else {
         await client.sendMessage(TARGET_CHAT, {
           message: finalText
         });
       }
 
-      console.log("✅ Forwarded:", normalizedTopic.slice(0, 70));
+      console.log("✅ Forwarded:", normalizedTopic.slice(0, 60));
 
     } catch (err) {
       console.error("❌ Error:", err.message);
