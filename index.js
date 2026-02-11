@@ -4,7 +4,7 @@ import { NewMessage } from "telegram/events/index.js";
 import axios from "axios";
 import express from "express";
 
-/* ================= DUMMY SERVER (Render Fix) ================= */
+/* ================= DUMMY SERVER (Render Fix) ============== */
 const app = express();
 const PORT = process.env.PORT || 3000;
 
