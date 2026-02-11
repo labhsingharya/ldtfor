@@ -2,6 +2,18 @@ import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
 import { NewMessage } from "telegram/events/index.js";
 import axios from "axios";
+import express from "express";
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get("/", (req, res) => {
+  res.send("Userbot Running");
+});
+
+app.listen(PORT, () => {
+  console.log("🌐 Dummy server running on port", PORT);
+});
 
 /* ================= ENV ================= */
 const apiId = Number(process.env.API_ID);
