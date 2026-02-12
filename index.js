@@ -31,7 +31,7 @@ const EXCEPT_CHATS = [
   -10011864904417
 ];
 
-const KEYWORDS = ["loot", "fast", "grab", "steal"];
+const KEYWORDS = ["loot", "fast", "grab", "steal", "buy max"];
 const REPLACE_LINK = "https://t.me/Lootdealtricky";
 const CACHE_TIME = 30 * 60 * 1000;
 
