@@ -1,238 +1,170 @@
-const { TelegramClient, Api } = require("telegram");
-const { StringSession } = require("telegram/sessions");
-const { NewMessage } = require("telegram/events");
-const { chromium } = require("playwright");
+import { TelegramClient } from "telegram";
+import { StringSession } from "telegram/sessions/index.js";
+import { NewMessage } from "telegram/events/index.js";
+import axios from "axios";
+import express from "express";
 
-/* ===== ENV ===== */
-const apiId = parseInt(process.env.API_ID);
+/* ================= DUMMY SERVER (Render Fix) ============== */
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get("/", (req, res) => {
+  res.send("Userbot Running");
+});
+
+app.listen(PORT, () => {
+  console.log("🌐 Dummy server running on port", PORT);
+});
+
+/* ================= ENV ================= */
+const apiId = Number(process.env.API_ID);
 const apiHash = process.env.API_HASH;
 const stringSession = new StringSession(process.env.SESSION_STRING);
 
-const sourceChat = process.env.SOURCE_CHAT || "-1003508245377";
-const destinationChat = process.env.DESTINATION_CHAT || "-1001208173141";
+/* ================= CONFIG ================= */
+const TARGET_CHAT = -1001717159768;
 
-/* =====================================================
-   🔤 REMOVE FANCY FONT TEXT
-===================================================== */
-function normalizeText(input) {
-  if (!input) return input;
+const EXCEPT_CHATS = [
+  -1001778288856,
+  -1007738288255,
+  -1007882828866,
+  -10011864904417
+];
 
-  return input
-    .replace(/[\u{1D400}-\u{1D7FF}]/gu, "")
-    .replace(/[\u{2100}-\u{214F}]/gu, "")
-    .replace(/[\u{2500}-\u{2BFF}]/gu, "")
-    .replace(/\s{2,}/g, " ")
+const KEYWORDS = ["loot", "fast", "grab", "steal", "buy max", "Lowest"];
+const REPLACE_LINK = "https://t.me/Lootdealtricky";
+const CACHE_TIME = 30 * 60 * 1000;
+
+/* ================= CACHE ================= */
+const urlCache = new Map();
+const textCache = new Map();
+
+/* ================= HELPERS ================= */
+
+function normalizeUnicodeFont(text = "") {
+  return text.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function hasKeyword(text = "") {
+  const t = text.toLowerCase();
+  return KEYWORDS.some(k => t.includes(k));
+}
+
+function normalizeText(text = "") {
+  return text
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/[^a-z0-9 ]/g, "")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
-/* =====================================================
-   🚦 MESSAGE SEND QUEUE (ANTI FLOOD SYSTEM)
-===================================================== */
-let sending = false;
-const queue = [];
-
-async function processQueue() {
-  if (sending || queue.length === 0) return;
-
-  sending = true;
-  const job = queue.shift();
-
-  try {
-    await job();
-  } catch (e) {
-    if (e.message && e.message.includes("FLOOD_WAIT")) {
-      const seconds = e.seconds || 10;
-      console.log(`🚨 FLOOD_WAIT ${seconds}s`);
-      await new Promise(r => setTimeout(r, seconds * 1000));
-    } else {
-      console.error("❌ Send Error:", e.message);
-    }
-  }
-
-  await new Promise(r => setTimeout(r, 1200)); // 1.2 sec gap
-  sending = false;
-  processQueue();
+function cleanCache() {
+  const now = Date.now();
+  for (const [k, v] of urlCache)
+    if (now - v > CACHE_TIME) urlCache.delete(k);
+  for (const [k, v] of textCache)
+    if (now - v > CACHE_TIME) textCache.delete(k);
 }
 
-/* =====================================================
-   🌐 PLAYWRIGHT LAZY BROWSER
-===================================================== */
-let browser;
-
-async function getBrowser() {
-  if (browser) return browser;
-
-  console.log("🧠 Launching Chromium...");
-  browser = await chromium.launch({
-    headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu"
-    ]
-  });
-
-  console.log("✅ Chromium Ready");
-  return browser;
-}
-
-/* =====================================================
-   🔁 STRICT faym → ONLY meesho
-===================================================== */
-async function unshortFaymStrict(url, depth = 0) {
-  if (depth > 5) return null;
-
-  let page;
+async function unshortUrl(url) {
   try {
-    const br = await getBrowser();
-    page = await br.newPage();
-
-    let finalUrl = null;
-
-    page.on("request", req => {
-      const reqUrl = req.url();
-      if (reqUrl.startsWith("http") && !reqUrl.includes("faym.co")) {
-        finalUrl = reqUrl;
-      }
+    const res = await axios.get(url, {
+      timeout: 5000,
+      maxRedirects: 5
     });
-
-    await page.goto(url, {
-      waitUntil: "domcontentloaded",
-      timeout: 30000
-    });
-
-    await page.waitForTimeout(6000);
-    await page.close();
-
-    if (!finalUrl) return null;
-
-    if (finalUrl.includes("meesho.com")) return finalUrl;
-
-    if (finalUrl.includes("faym.co")) {
-      return await unshortFaymStrict(finalUrl, depth + 1);
-    }
-
-    return null;
-
-  } catch (err) {
-    if (page) await page.close();
-    console.error("❌ Unshort Error:", err.message);
-    return null;
+    return res.request?.res?.responseUrl || url;
+  } catch {
+    return url;
   }
 }
 
-/* =====================================================
-   🚀 START BOT
-===================================================== */
+function replaceTelegramLinks(text = "") {
+  const t = normalizeUnicodeFont(text);
+
+  return t
+    .replace(/https?:\/\/t\.me\/[^\s]+/gi, REPLACE_LINK)
+    .replace(/@[\w\d_]+/gi, REPLACE_LINK)
+    .replace(/loot\s*deal\s*tricky/gi, REPLACE_LINK);
+}
+
+/* ================= START ================= */
 (async () => {
-  console.log("🚀 Bot Starting...");
+  const client = new TelegramClient(
+    stringSession,
+    apiId,
+    apiHash,
+    { connectionRetries: 5 }
+  );
 
-  const client = new TelegramClient(stringSession, apiId, apiHash, {
-    connectionRetries: 5
-  });
-
-  await client.connect();
-  console.log("✅ Bot Connected | Watching:", sourceChat);
+  await client.start();
+  console.log("✅ Telegram user connected");
 
   client.addEventHandler(async (event) => {
-    const message = event.message;
-    if (!message || !message.peerId) return;
-
     try {
-      const senderChatId = (await client.getPeerId(message.peerId)).toString();
-      if (senderChatId !== sourceChat) return;
+      const msg = event.message;
+      if (!msg || !msg.peerId) return;
 
-      let text = message.message || message.text || "";
-      text = normalizeText(text);
+      const entity = await msg.getChat();
+      const chatId = entity?.id;
 
-      /* ===== PROCESS faym LINKS ===== */
-      const urls = text.match(/https?:\/\/[^\s]+/g) || [];
-      let reject = false;
+      if (!chatId) return;
+      if (EXCEPT_CHATS.includes(Number(chatId))) return;
 
-      for (const url of urls) {
-        if (url.includes("faym.co")) {
-          const finalUrl = await unshortFaymStrict(url);
+      const rawText = msg.message || msg.text || "";
+      if (!hasKeyword(rawText)) return;
 
-          if (!finalUrl) {
-            reject = true;
-            break;
+      cleanCache();
+
+      /* ---------- URL DUPLICATE BLOCK ---------- */
+      const urls = rawText.match(/https?:\/\/\S+/gi) || [];
+      for (const u of urls) {
+        const finalUrl = await unshortUrl(u);
+        if (urlCache.has(finalUrl)) return;
+        urlCache.set(finalUrl, Date.now());
+      }
+
+      /* ---------- TEXT DUPLICATE BLOCK ---------- */
+      const normalizedTopic = normalizeText(
+        normalizeUnicodeFont(rawText)
+      );
+
+      if (textCache.has(normalizedTopic)) return;
+      textCache.set(normalizedTopic, Date.now());
+
+      const finalText = replaceTelegramLinks(rawText);
+
+      /* ================= MEDIA FIX ================= */
+      if (msg.media) {
+
+        // Forward original message
+        const forwarded = await client.forwardMessages(
+          TARGET_CHAT,
+          {
+            messages: [msg.id],
+            fromPeer: entity
           }
+        );
 
-          text = text.split(url).join(finalUrl);
-        }
-      }
-
-      if (reject) {
-        console.log("⛔ Non-Meesho link found → skipped");
-        return;
-      }
-
-      /* =====================================================
-         📸 MEDIA MESSAGE
-      ===================================================== */
-      if (message.media) {
-
-        if (text && text.length > 1024) {
-          text = text.substring(0, 1020) + "...";
-        }
-
-        queue.push(async () => {
-          await client.sendFile(destinationChat, {
-            file: message, // FIXED object issue
-            caption: text || undefined
+        // Edit caption after forward (for link replace)
+        if (forwarded?.length && finalText !== rawText) {
+          await client.editMessage(TARGET_CHAT, {
+            message: forwarded[0].id,
+            text: finalText
           });
-          console.log("📸 Media forwarded");
-        });
+        }
 
-        processQueue();
-        return;
+      } else {
+        await client.sendMessage(TARGET_CHAT, {
+          message: finalText
+        });
       }
 
-      /* =====================================================
-         📝 TEXT MESSAGE
-      ===================================================== */
-      if (text.trim()) {
-
-        queue.push(async () => {
-          await client.invoke(
-            new Api.messages.SendMessage({
-              peer: destinationChat,
-              message: text,
-              noWebpage: false
-            })
-          );
-          console.log("📝 Text forwarded");
-        });
-
-        processQueue();
-      }
+      console.log("✅ Forwarded:", normalizedTopic.slice(0, 60));
 
     } catch (err) {
-      console.error("❌ Handler Error:", err.message);
+      console.error("❌ Error:", err.message);
     }
-
   }, new NewMessage({}));
 
 })();
-
-/* =====================================================
-   🛑 GRACEFUL SHUTDOWN
-===================================================== */
-async function closeBrowser() {
-  if (browser) {
-    console.log("🛑 Closing Browser...");
-    await browser.close();
-    browser = null;
-  }
-}
-
-process.on("SIGTERM", async () => {
-  await closeBrowser();
-  process.exit(0);
-});
-
-process.on("SIGINT", async () => {
-  await closeBrowser();
-  process.exit(0);
-});
