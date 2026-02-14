@@ -43,9 +43,7 @@ const processedMessages = new Set();
 /* ================= HELPERS ================= */
 
 function normalizeUnicodeFont(text = "") {
-  return text
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "");
+  return text.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
 }
 
 function cleanForTrigger(text = "") {
@@ -76,7 +74,7 @@ function cleanCache() {
   for (const [k, v] of textCache)
     if (now - v > CACHE_TIME) textCache.delete(k);
 
-  if (processedMessages.size > 2000)
+  if (processedMessages.size > 3000)
     processedMessages.clear();
 }
 
@@ -120,27 +118,29 @@ function replaceTelegramLinks(text = "") {
       const msg = event.message;
       if (!msg || !msg.peerId) return;
 
-      // 🚫 Ignore self messages (LOOP FIX)
+      // 🚫 Ignore self messages (loop protection)
       if (msg.out) return;
 
       const entity = await msg.getChat();
       const chatId = Number(entity?.id);
       if (!chatId) return;
 
-      // 🚫 Ignore target group (LOOP FIX)
+      console.log("📩 Incoming from:", chatId);
+
+      // 🚫 Ignore target group
       if (chatId === TARGET_CHAT) return;
 
       // 🚫 Ignore except chats
       if (EXCEPT_CHATS.includes(chatId)) return;
 
-      // 🚫 Duplicate message guard
+      // 🚫 Duplicate guard
       const uniqueId = `${chatId}_${msg.id}`;
       if (processedMessages.has(uniqueId)) return;
       processedMessages.add(uniqueId);
 
       const rawText = msg.message || msg.text || "";
 
-      // 🔥 TRIGGER CHECK (works with font / emoji / case)
+      // 🔥 Trigger check (emoji / font safe / case safe)
       if (!hasKeyword(rawText)) return;
 
       cleanCache();
@@ -198,6 +198,6 @@ function replaceTelegramLinks(text = "") {
       console.error("❌ Error:", err.message);
     }
 
-  }, new NewMessage({}));
+  }, new NewMessage({ incoming: true }));
 
 })();
