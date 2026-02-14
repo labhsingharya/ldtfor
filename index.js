@@ -28,7 +28,8 @@ const EXCEPT_CHATS = [
   -1001778288856,
   -1007738288255,
   -1007882828866,
-  -10011864904417
+  -10011864904417,
+  TARGET_CHAT // 🔥 IMPORTANT: target auto-excluded
 ];
 
 const KEYWORDS = ["loot", "fast", "grab", "steal", "buy max", "lowest"];
@@ -38,6 +39,7 @@ const CACHE_TIME = 30 * 60 * 1000;
 /* ================= CACHE ================= */
 const urlCache = new Map();
 const textCache = new Map();
+const processedMessages = new Set();
 
 /* ================= HELPERS ================= */
 
@@ -105,11 +107,24 @@ function replaceTelegramLinks(text = "") {
       const msg = event.message;
       if (!msg || !msg.peerId) return;
 
-      const entity = await msg.getChat();
-      const chatId = entity?.id;
+      // ❌ Ignore self messages (LOOP FIX)
+      if (msg.out) return;
 
+      const entity = await msg.getChat();
+      const chatId = Number(entity?.id);
       if (!chatId) return;
-      if (EXCEPT_CHATS.includes(Number(chatId))) return;
+
+      // ❌ Ignore target & except groups (LOOP FIX)
+      if (EXCEPT_CHATS.includes(chatId)) return;
+
+      // ❌ Prevent duplicate processing
+      const uniqueId = `${chatId}_${msg.id}`;
+      if (processedMessages.has(uniqueId)) return;
+      processedMessages.add(uniqueId);
+
+      if (processedMessages.size > 2000) {
+        processedMessages.clear();
+      }
 
       const rawText = msg.message || msg.text || "";
       if (!hasKeyword(rawText)) return;
@@ -132,12 +147,15 @@ function replaceTelegramLinks(text = "") {
       if (textCache.has(normalizedTopic)) return;
       textCache.set(normalizedTopic, Date.now());
 
-      const finalText = replaceTelegramLinks(rawText);
+      let finalText = replaceTelegramLinks(rawText);
 
       /* ================= MEDIA FIX ================= */
       if (msg.media) {
 
-        // Forward original message
+        if (finalText.length > 1024) {
+          finalText = finalText.slice(0, 1020) + "...";
+        }
+
         const forwarded = await client.forwardMessages(
           TARGET_CHAT,
           {
@@ -146,7 +164,6 @@ function replaceTelegramLinks(text = "") {
           }
         );
 
-        // Edit caption after forward (for link replace)
         if (forwarded?.length && finalText !== rawText) {
           await client.editMessage(TARGET_CHAT, {
             message: forwarded[0].id,
@@ -155,9 +172,11 @@ function replaceTelegramLinks(text = "") {
         }
 
       } else {
+
         await client.sendMessage(TARGET_CHAT, {
           message: finalText
         });
+
       }
 
       console.log("✅ Forwarded:", normalizedTopic.slice(0, 60));
