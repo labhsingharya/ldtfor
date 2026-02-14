@@ -4,7 +4,7 @@ import { NewMessage } from "telegram/events/index.js";
 import axios from "axios";
 import express from "express";
 
-/* ================= DUMMY SERVER (Render Fix) ============== */
+/* ================= DUMMY SERVER ================= */
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -28,8 +28,7 @@ const EXCEPT_CHATS = [
   -1001778288856,
   -1007738288255,
   -1007882828866,
-  -10011864904417,
-  TARGET_CHAT // 🔥 IMPORTANT: target auto-excluded
+  -10011864904417
 ];
 
 const KEYWORDS = ["loot", "fast", "grab", "steal", "buy max", "lowest"];
@@ -44,29 +43,41 @@ const processedMessages = new Set();
 /* ================= HELPERS ================= */
 
 function normalizeUnicodeFont(text = "") {
-  return text.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
-}
-
-function hasKeyword(text = "") {
-  const t = text.toLowerCase();
-  return KEYWORDS.some(k => t.includes(k));
-}
-
-function normalizeText(text = "") {
   return text
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function cleanForTrigger(text = "") {
+  return normalizeUnicodeFont(text)
     .toLowerCase()
-    .replace(/https?:\/\/\S+/g, "")
     .replace(/[^a-z0-9 ]/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }
 
+function hasKeyword(text = "") {
+  const cleaned = cleanForTrigger(text);
+  return KEYWORDS.some(k => cleaned.includes(k));
+}
+
+function normalizeText(text = "") {
+  return cleanForTrigger(text)
+    .replace(/https?:\/\/\S+/g, "")
+    .trim();
+}
+
 function cleanCache() {
   const now = Date.now();
+
   for (const [k, v] of urlCache)
     if (now - v > CACHE_TIME) urlCache.delete(k);
+
   for (const [k, v] of textCache)
     if (now - v > CACHE_TIME) textCache.delete(k);
+
+  if (processedMessages.size > 2000)
+    processedMessages.clear();
 }
 
 async function unshortUrl(url) {
@@ -92,6 +103,7 @@ function replaceTelegramLinks(text = "") {
 
 /* ================= START ================= */
 (async () => {
+
   const client = new TelegramClient(
     stringSession,
     apiId,
@@ -103,36 +115,39 @@ function replaceTelegramLinks(text = "") {
   console.log("✅ Telegram user connected");
 
   client.addEventHandler(async (event) => {
+
     try {
       const msg = event.message;
       if (!msg || !msg.peerId) return;
 
-      // ❌ Ignore self messages (LOOP FIX)
+      // 🚫 Ignore self messages (LOOP FIX)
       if (msg.out) return;
 
       const entity = await msg.getChat();
       const chatId = Number(entity?.id);
       if (!chatId) return;
 
-      // ❌ Ignore target & except groups (LOOP FIX)
+      // 🚫 Ignore target group (LOOP FIX)
+      if (chatId === TARGET_CHAT) return;
+
+      // 🚫 Ignore except chats
       if (EXCEPT_CHATS.includes(chatId)) return;
 
-      // ❌ Prevent duplicate processing
+      // 🚫 Duplicate message guard
       const uniqueId = `${chatId}_${msg.id}`;
       if (processedMessages.has(uniqueId)) return;
       processedMessages.add(uniqueId);
 
-      if (processedMessages.size > 2000) {
-        processedMessages.clear();
-      }
-
       const rawText = msg.message || msg.text || "";
+
+      // 🔥 TRIGGER CHECK (works with font / emoji / case)
       if (!hasKeyword(rawText)) return;
 
       cleanCache();
 
       /* ---------- URL DUPLICATE BLOCK ---------- */
       const urls = rawText.match(/https?:\/\/\S+/gi) || [];
+
       for (const u of urls) {
         const finalUrl = await unshortUrl(u);
         if (urlCache.has(finalUrl)) return;
@@ -140,21 +155,19 @@ function replaceTelegramLinks(text = "") {
       }
 
       /* ---------- TEXT DUPLICATE BLOCK ---------- */
-      const normalizedTopic = normalizeText(
-        normalizeUnicodeFont(rawText)
-      );
+      const normalizedTopic = normalizeText(rawText);
 
       if (textCache.has(normalizedTopic)) return;
       textCache.set(normalizedTopic, Date.now());
 
       let finalText = replaceTelegramLinks(rawText);
 
-      /* ================= MEDIA FIX ================= */
-      if (msg.media) {
+      /* ---------- CAPTION LIMIT FIX ---------- */
+      if (finalText.length > 1024)
+        finalText = finalText.substring(0, 1020) + "...";
 
-        if (finalText.length > 1024) {
-          finalText = finalText.slice(0, 1020) + "...";
-        }
+      /* ================= MEDIA ================= */
+      if (msg.media) {
 
         const forwarded = await client.forwardMessages(
           TARGET_CHAT,
@@ -184,6 +197,7 @@ function replaceTelegramLinks(text = "") {
     } catch (err) {
       console.error("❌ Error:", err.message);
     }
+
   }, new NewMessage({}));
 
 })();
