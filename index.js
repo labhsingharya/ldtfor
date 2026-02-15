@@ -115,11 +115,18 @@ function replaceTelegramLinks(text = "") {
   client.addEventHandler(async (event) => {
 
     try {
+
       const msg = event.message;
       if (!msg || !msg.peerId) return;
 
-      // 🚫 Ignore self messages (loop protection)
+      // 🚫 Ignore edited messages completely
+      if (event.edit) return;
+
+      // 🚫 Ignore self messages
       if (msg.out) return;
+
+      // 🚫 Ignore forwarded messages (stops target poll loop)
+      if (msg.fwdFrom) return;
 
       const entity = await msg.getChat();
       const chatId = Number(entity?.id);
@@ -127,7 +134,7 @@ function replaceTelegramLinks(text = "") {
 
       console.log("📩 Incoming from:", chatId);
 
-      // 🚫 Ignore target group
+      // 🚫 STRICT: Never touch target group
       if (chatId === TARGET_CHAT) return;
 
       // 🚫 Ignore except chats
@@ -140,7 +147,7 @@ function replaceTelegramLinks(text = "") {
 
       const rawText = msg.message || msg.text || "";
 
-      // 🔥 Trigger check (emoji / font safe / case safe)
+      // 🔥 Trigger check (emoji / font / case safe)
       if (!hasKeyword(rawText)) return;
 
       cleanCache();
@@ -166,7 +173,7 @@ function replaceTelegramLinks(text = "") {
       if (finalText.length > 1024)
         finalText = finalText.substring(0, 1020) + "...";
 
-      /* ================= MEDIA ================= */
+      /* ================= FORWARD ================= */
       if (msg.media) {
 
         const forwarded = await client.forwardMessages(
