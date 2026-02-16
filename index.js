@@ -102,7 +102,8 @@ function replaceTelegramLinks(text = "") {
   );
 
   await client.start();
-  console.log("✅ Telegram Connected");
+  await client.getDialogs({ limit: 500 });
+console.log("📡 Dialogs Synced");
 
   client.addEventHandler(async (event) => {
 
@@ -213,6 +214,6 @@ function replaceTelegramLinks(text = "") {
       console.error("❌ Error:", err.message);
     }
 
-  }, new NewMessage({}));
-
-})();   // 🔴 DO NOT REMOVE THIS LINE
+  }, new NewMessage({
+  incoming: true
+}));
