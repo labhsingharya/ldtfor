@@ -103,71 +103,114 @@ function replaceTelegramLinks(text = "") {
 
   client.addEventHandler(async (event) => {
 
-    try {
+  try {
 
-      const msg = event.message;
-      if (!msg) return;
+    const msg = event.message;
+    if (!msg) return;
 
-      if (event.edit) return;
-      if (msg.out) return;
+    if (event.edit) return;
+    if (msg.out) return;
 
-      const chatId = Number(event.chatId);
-      if (!chatId) return;
+    const chatId = Number(event.chatId);
+    if (!chatId) return;
 
-      console.log("📩 Incoming from:", chatId);
+    const entity = await msg.getChat();
+    const chatName =
+      entity?.title ||
+      entity?.username ||
+      entity?.firstName ||
+      "Unknown";
 
-      // Never process target
-      if (chatId === TARGET_CHAT) return;
+    const rawText = msg.message || msg.text || "";
+    const preview = rawText.slice(0, 80).replace(/\n/g, " ");
 
-      if (EXCEPT_CHATS.includes(chatId)) return;
+    console.log("\n==============================");
+    console.log(`📩 Chat: ${chatName}`);
+    console.log(`🆔 Chat ID: ${chatId}`);
+    console.log(`📝 Preview: ${preview}`);
 
-      const rawText = msg.message || msg.text || "";
-
-      if (!rawText && !msg.media) return;
-
-      if (rawText.includes("EarnKaro Converter")) return;
-      if (rawText.includes("Lootdealtricky")) return;
-
-      const fingerprint = `${chatId}_${msg.id}`;
-      if (processedMessages.has(fingerprint)) return;
-      processedMessages.add(fingerprint);
-
-      if (!hasKeyword(rawText)) return;
-
-      cleanCache();
-
-      const urls = rawText.match(/https?:\/\/\S+/gi) || [];
-      for (const u of urls) {
-        const finalUrl = await unshortUrl(u);
-        if (urlCache.has(finalUrl)) return;
-        urlCache.set(finalUrl, Date.now());
-      }
-
-      const normalizedTopic = normalizeText(rawText);
-      if (textCache.has(normalizedTopic)) return;
-      textCache.set(normalizedTopic, Date.now());
-
-      let finalText = replaceTelegramLinks(rawText);
-
-      if (finalText.length > 1024)
-        finalText = finalText.substring(0, 1020) + "...";
-
-      /* ================= COPY METHOD ================= */
-
-      await client.invoke({
-        _: "messages.copyMessages",
-        from_peer: msg.peerId,
-        id: [msg.id],
-        to_peer: TARGET_CHAT,
-        random_id: [BigInt(Date.now())]
-      });
-
-      console.log("✅ Copied safely");
-
-    } catch (err) {
-      console.error("❌ Error:", err.message);
+    // 🔴 Target block
+    if (chatId === TARGET_CHAT) {
+      console.log("⛔ Skipped (Target group)");
+      return;
     }
 
-  }, new NewMessage({}));
+    // 🔴 Except block
+    if (EXCEPT_CHATS.includes(chatId)) {
+      console.log("⛔ Skipped (Except list)");
+      return;
+    }
 
-})();
+    if (!rawText && !msg.media) {
+      console.log("⛔ Skipped (Empty message)");
+      return;
+    }
+
+    if (rawText.includes("EarnKaro Converter")) {
+      console.log("⛔ Skipped (Converter text)");
+      return;
+    }
+
+    if (rawText.includes("Lootdealtricky")) {
+      console.log("⛔ Skipped (Own link detected)");
+      return;
+    }
+
+    const fingerprint = `${chatId}_${msg.id}`;
+    if (processedMessages.has(fingerprint)) {
+      console.log("⛔ Skipped (Duplicate fingerprint)");
+      return;
+    }
+    processedMessages.add(fingerprint);
+
+    // 🔥 Trigger Check
+    if (!hasKeyword(rawText)) {
+      console.log("❌ Not Triggered (No keyword)");
+      return;
+    }
+
+    console.log("🔥 Trigger Matched!");
+
+    cleanCache();
+
+    // URL duplicate block
+    const urls = rawText.match(/https?:\/\/\S+/gi) || [];
+    for (const u of urls) {
+      const finalUrl = await unshortUrl(u);
+      if (urlCache.has(finalUrl)) {
+        console.log("⛔ Skipped (Duplicate URL)");
+        return;
+      }
+      urlCache.set(finalUrl, Date.now());
+    }
+
+    const normalizedTopic = normalizeText(rawText);
+    if (textCache.has(normalizedTopic)) {
+      console.log("⛔ Skipped (Duplicate text)");
+      return;
+    }
+    textCache.set(normalizedTopic, Date.now());
+
+    let finalText = replaceTelegramLinks(rawText);
+
+    if (finalText.length > 1024)
+      finalText = finalText.substring(0, 1020) + "...";
+
+    /* ================= COPY ================= */
+
+    await client.invoke({
+      _: "messages.copyMessages",
+      from_peer: msg.peerId,
+      id: [msg.id],
+      to_peer: TARGET_CHAT,
+      random_id: [BigInt(Date.now())]
+    });
+
+    console.log("✅ Successfully Copied to Target");
+    console.log("==============================\n");
+
+  } catch (err) {
+    console.error("❌ Error:", err.message);
+  }
+
+}, new NewMessage({}));
