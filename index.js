@@ -7,7 +7,6 @@ import express from "express";
 /* ================= SERVER ================= */
 const app = express();
 const PORT = process.env.PORT || 3000;
-
 app.get("/", (_, res) => res.send("Userbot Running"));
 app.listen(PORT, () => console.log("🌐 Server running on", PORT));
 
@@ -19,21 +18,12 @@ const stringSession = new StringSession(process.env.SESSION_STRING);
 /* ================= CONFIG ================= */
 const TARGET_CHAT = -1001717159768;
 
-const EXCEPT_CHATS = [
-  -1001778288856,
-  -1007738288255,
-  -1007882828866,
-  -10011864904417
-];
-
 const KEYWORDS = ["loot", "fast", "grab", "steal", "buy max", "lowest"];
-const REPLACE_LINK = "https://t.me/Lootdealtricky";
 const CACHE_TIME = 30 * 60 * 1000;
 
-/* ================= CACHE ================= */
-const urlCache = new Map();
-const textCache = new Map();
-const processedMessages = new Set();
+/* ================= MEMORY ================= */
+const processed = new Set();
+const lastChannelMessage = new Map();
 
 /* ================= HELPERS ================= */
 
@@ -41,7 +31,7 @@ function normalizeUnicodeFont(text = "") {
   return text.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
 }
 
-function cleanForTrigger(text = "") {
+function clean(text = "") {
   return normalizeUnicodeFont(text)
     .toLowerCase()
     .replace(/[^a-z0-9 ]/g, "")
@@ -50,48 +40,53 @@ function cleanForTrigger(text = "") {
 }
 
 function hasKeyword(text = "") {
-  return KEYWORDS.some(k => cleanForTrigger(text).includes(k));
+  const cleaned = clean(text);
+  return KEYWORDS.some(k => cleaned.includes(k));
 }
 
-function normalizeText(text = "") {
-  return cleanForTrigger(text).replace(/https?:\/\/\S+/g, "").trim();
+function shortPreview(text = "") {
+  return text.slice(0, 80).replace(/\n/g, " ");
 }
 
-function cleanCache() {
-  const now = Date.now();
+/* ================= PROCESS FUNCTION ================= */
 
-  for (const [k, v] of urlCache)
-    if (now - v > CACHE_TIME) urlCache.delete(k);
+async function processMessage(client, msg, chatName) {
 
-  for (const [k, v] of textCache)
-    if (now - v > CACHE_TIME) textCache.delete(k);
+  const rawText = msg.message || msg.text || "";
+  if (!rawText) return;
 
-  if (processedMessages.size > 5000)
-    processedMessages.clear();
-}
+  const fingerprint = `${msg.chatId}_${msg.id}`;
+  if (processed.has(fingerprint)) return;
+  processed.add(fingerprint);
 
-async function unshortUrl(url) {
-  try {
-    const res = await axios.get(url, {
-      timeout: 5000,
-      maxRedirects: 5
-    });
-    return res.request?.res?.responseUrl || url;
-  } catch {
-    return url;
+  if (processed.size > 10000)
+    processed.clear();
+
+  console.log("\n==============================");
+  console.log(`📩 Channel: ${chatName}`);
+  console.log(`📝 Preview: ${shortPreview(rawText)}`);
+
+  if (!hasKeyword(rawText)) {
+    console.log("❌ Not Triggered");
+    return;
   }
-}
 
-function replaceTelegramLinks(text = "") {
-  const t = normalizeUnicodeFont(text);
+  console.log("🔥 Trigger Matched");
 
-  return t
-    .replace(/https?:\/\/t\.me\/[^\s]+/gi, REPLACE_LINK)
-    .replace(/@[\w\d_]+/gi, REPLACE_LINK)
-    .replace(/loot\s*deal\s*tricky/gi, REPLACE_LINK);
+  await client.invoke({
+    _: "messages.copyMessages",
+    from_peer: msg.peerId,
+    id: [msg.id],
+    to_peer: TARGET_CHAT,
+    random_id: [BigInt(Date.now())]
+  });
+
+  console.log("✅ Copied to Target");
+  console.log("==============================\n");
 }
 
 /* ================= START ================= */
+
 (async () => {
 
   const client = new TelegramClient(
@@ -104,17 +99,10 @@ function replaceTelegramLinks(text = "") {
   await client.start();
   console.log("✅ Telegram Connected");
 
-  /* 🔥 FORCE DIALOG SYNC (VERY IMPORTANT FOR CHANNELS) */
   await client.getDialogs({ limit: 500 });
   console.log("📡 Dialogs Synced");
 
-  /* 🔥 PERIODIC SYNC (Fix broadcast delay issue) */
-  setInterval(async () => {
-    try {
-      await client.getDialogs({ limit: 200 });
-      console.log("🔄 Dialog Refresh");
-    } catch {}
-  }, 5 * 60 * 1000); // every 5 minutes
+  /* ================= REALTIME LISTENER ================= */
 
   client.addEventHandler(async (event) => {
 
@@ -122,113 +110,63 @@ function replaceTelegramLinks(text = "") {
 
       const msg = event.message;
       if (!msg) return;
-
-      if (event.edit) return;
       if (msg.out) return;
 
       const chatId = Number(event.chatId);
       if (!chatId) return;
+      if (chatId === TARGET_CHAT) return;
 
       const entity = await msg.getChat();
-      const chatName =
-        entity?.title ||
-        entity?.username ||
-        entity?.firstName ||
-        "Unknown";
+      const chatName = entity?.title || entity?.username || "Unknown";
 
-      const rawText = msg.message || msg.text || "";
-      const preview = rawText.slice(0, 80).replace(/\n/g, " ");
-
-      console.log("\n==============================");
-      console.log(`📩 Chat: ${chatName}`);
-      console.log(`🆔 Chat ID: ${chatId}`);
-      console.log(`📝 Preview: ${preview}`);
-
-      if (msg.post === true) {
-        console.log("📢 Broadcast Channel Post");
-      }
-
-      // Never process target
-      if (chatId === TARGET_CHAT) {
-        console.log("⛔ Skipped (Target)");
-        return;
-      }
-
-      if (EXCEPT_CHATS.includes(chatId)) {
-        console.log("⛔ Skipped (Except)");
-        return;
-      }
-
-      if (!rawText && !msg.media) {
-        console.log("⛔ Skipped (Empty)");
-        return;
-      }
-
-      if (rawText.includes("EarnKaro Converter")) {
-        console.log("⛔ Skipped (Converter)");
-        return;
-      }
-
-      if (rawText.includes("Lootdealtricky")) {
-        console.log("⛔ Skipped (Own Link)");
-        return;
-      }
-
-      const fingerprint = `${chatId}_${msg.id}`;
-      if (processedMessages.has(fingerprint)) {
-        console.log("⛔ Skipped (Duplicate)");
-        return;
-      }
-      processedMessages.add(fingerprint);
-
-      if (!hasKeyword(rawText)) {
-        console.log("❌ Not Triggered");
-        return;
-      }
-
-      console.log("🔥 Trigger Matched");
-
-      cleanCache();
-
-      const urls = rawText.match(/https?:\/\/\S+/gi) || [];
-      for (const u of urls) {
-        const finalUrl = await unshortUrl(u);
-        if (urlCache.has(finalUrl)) {
-          console.log("⛔ Skipped (Duplicate URL)");
-          return;
-        }
-        urlCache.set(finalUrl, Date.now());
-      }
-
-      const normalizedTopic = normalizeText(rawText);
-      if (textCache.has(normalizedTopic)) {
-        console.log("⛔ Skipped (Duplicate Text)");
-        return;
-      }
-      textCache.set(normalizedTopic, Date.now());
-
-      let finalText = replaceTelegramLinks(rawText);
-
-      if (finalText.length > 1024)
-        finalText = finalText.substring(0, 1020) + "...";
-
-      /* ================= COPY METHOD ================= */
-
-      await client.invoke({
-        _: "messages.copyMessages",
-        from_peer: msg.peerId,
-        id: [msg.id],
-        to_peer: TARGET_CHAT,
-        random_id: [BigInt(Date.now())]
-      });
-
-      console.log("✅ Copied Successfully");
-      console.log("==============================\n");
+      await processMessage(client, msg, chatName);
 
     } catch (err) {
-      console.error("❌ Error:", err.message);
+      console.log("Realtime Error:", err.message);
     }
 
   }, new NewMessage({ incoming: true }));
+
+
+  /* ================= LARGE CHANNEL POLLING ================= */
+
+  setInterval(async () => {
+
+    try {
+
+      console.log("🔄 Polling Large Channels...");
+
+      const dialogs = await client.getDialogs({ limit: 300 });
+
+      for (const dialog of dialogs) {
+
+        if (!dialog.isChannel) continue;
+
+        const entity = dialog.entity;
+        const channelId = entity.id;
+        if (!channelId) continue;
+        if (channelId === TARGET_CHAT) continue;
+
+        const messages = await client.getMessages(entity, { limit: 1 });
+        if (!messages.length) continue;
+
+        const latest = messages[0];
+
+        if (lastChannelMessage.get(channelId) === latest.id)
+          continue;
+
+        lastChannelMessage.set(channelId, latest.id);
+
+        console.log("📢 Poll Detected:", entity.title);
+
+        await processMessage(client, latest, entity.title);
+
+      }
+
+    } catch (err) {
+      console.log("Polling Error:", err.message);
+    }
+
+  }, 30000); // every 30 sec
 
 })();
