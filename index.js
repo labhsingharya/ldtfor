@@ -1,7 +1,6 @@
-import { TelegramClient } from "telegram";
+import { TelegramClient, Api } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
 import { NewMessage } from "telegram/events/index.js";
-import axios from "axios";
 import express from "express";
 
 /* ================= SERVER ================= */
@@ -17,22 +16,19 @@ const stringSession = new StringSession(process.env.SESSION_STRING);
 
 /* ================= CONFIG ================= */
 const TARGET_CHAT = -1001717159768;
-
 const KEYWORDS = ["loot", "fast", "grab", "steal", "buy max", "lowest"];
-const CACHE_TIME = 30 * 60 * 1000;
 
 /* ================= MEMORY ================= */
 const processed = new Set();
 const lastChannelMessage = new Map();
+let pollingInitialized = false;
 
 /* ================= HELPERS ================= */
 
-function normalizeUnicodeFont(text = "") {
-  return text.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
-}
-
-function clean(text = "") {
-  return normalizeUnicodeFont(text)
+function normalize(text = "") {
+  return text
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9 ]/g, "")
     .replace(/\s+/g, " ")
@@ -40,11 +36,11 @@ function clean(text = "") {
 }
 
 function hasKeyword(text = "") {
-  const cleaned = clean(text);
+  const cleaned = normalize(text);
   return KEYWORDS.some(k => cleaned.includes(k));
 }
 
-function shortPreview(text = "") {
+function preview(text = "") {
   return text.slice(0, 80).replace(/\n/g, " ");
 }
 
@@ -52,19 +48,16 @@ function shortPreview(text = "") {
 
 async function processMessage(client, msg, chatName) {
 
-  const rawText = msg.message || msg.text || "";
+  const rawText = msg.message || "";
   if (!rawText) return;
 
-  const fingerprint = `${msg.chatId}_${msg.id}`;
-  if (processed.has(fingerprint)) return;
-  processed.add(fingerprint);
-
-  if (processed.size > 10000)
-    processed.clear();
+  const unique = `${msg.chatId}_${msg.id}`;
+  if (processed.has(unique)) return;
+  processed.add(unique);
 
   console.log("\n==============================");
   console.log(`📩 Channel: ${chatName}`);
-  console.log(`📝 Preview: ${shortPreview(rawText)}`);
+  console.log(`📝 Preview: ${preview(rawText)}`);
 
   if (!hasKeyword(rawText)) {
     console.log("❌ Not Triggered");
@@ -73,13 +66,14 @@ async function processMessage(client, msg, chatName) {
 
   console.log("🔥 Trigger Matched");
 
-  await client.invoke({
-    _: "messages.copyMessages",
-    from_peer: msg.peerId,
-    id: [msg.id],
-    to_peer: TARGET_CHAT,
-    random_id: [BigInt(Date.now())]
-  });
+  await client.invoke(
+    new Api.messages.CopyMessages({
+      fromPeer: msg.peerId,
+      id: [msg.id],
+      toPeer: TARGET_CHAT,
+      randomId: [BigInt(Date.now())]
+    })
+  );
 
   console.log("✅ Copied to Target");
   console.log("==============================\n");
@@ -102,10 +96,9 @@ async function processMessage(client, msg, chatName) {
   await client.getDialogs({ limit: 500 });
   console.log("📡 Dialogs Synced");
 
-  /* ================= REALTIME LISTENER ================= */
+  /* ================= REALTIME ================= */
 
   client.addEventHandler(async (event) => {
-
     try {
 
       const msg = event.message;
@@ -117,24 +110,23 @@ async function processMessage(client, msg, chatName) {
       if (chatId === TARGET_CHAT) return;
 
       const entity = await msg.getChat();
-      const chatName = entity?.title || entity?.username || "Unknown";
+      const chatName = entity?.title || "Unknown";
 
       await processMessage(client, msg, chatName);
 
     } catch (err) {
       console.log("Realtime Error:", err.message);
     }
-
   }, new NewMessage({ incoming: true }));
 
 
-  /* ================= LARGE CHANNEL POLLING ================= */
+  /* ================= POLLING (ONLY NEW POSTS) ================= */
 
   setInterval(async () => {
 
     try {
 
-      console.log("🔄 Polling Large Channels...");
+      console.log("🔄 Polling...");
 
       const dialogs = await client.getDialogs({ limit: 300 });
 
@@ -144,7 +136,6 @@ async function processMessage(client, msg, chatName) {
 
         const entity = dialog.entity;
         const channelId = entity.id;
-        if (!channelId) continue;
         if (channelId === TARGET_CHAT) continue;
 
         const messages = await client.getMessages(entity, { limit: 1 });
@@ -152,21 +143,29 @@ async function processMessage(client, msg, chatName) {
 
         const latest = messages[0];
 
+        // First cycle: only store IDs, don't process
+        if (!pollingInitialized) {
+          lastChannelMessage.set(channelId, latest.id);
+          continue;
+        }
+
         if (lastChannelMessage.get(channelId) === latest.id)
           continue;
 
         lastChannelMessage.set(channelId, latest.id);
 
-        console.log("📢 Poll Detected:", entity.title);
+        console.log("📢 New Post Detected:", entity.title);
 
         await processMessage(client, latest, entity.title);
 
       }
 
+      pollingInitialized = true;
+
     } catch (err) {
       console.log("Polling Error:", err.message);
     }
 
-  }, 30000); // every 30 sec
+  }, 30000);
 
 })();
