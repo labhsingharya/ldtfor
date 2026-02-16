@@ -4,17 +4,12 @@ import { NewMessage } from "telegram/events/index.js";
 import axios from "axios";
 import express from "express";
 
-/* ================= DUMMY SERVER ================= */
+/* ================= SERVER ================= */
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.get("/", (req, res) => {
-  res.send("Userbot Running");
-});
-
-app.listen(PORT, () => {
-  console.log("🌐 Dummy server running on port", PORT);
-});
+app.get("/", (_, res) => res.send("Userbot Running"));
+app.listen(PORT, () => console.log("🌐 Running on", PORT));
 
 /* ================= ENV ================= */
 const apiId = Number(process.env.API_ID);
@@ -55,14 +50,11 @@ function cleanForTrigger(text = "") {
 }
 
 function hasKeyword(text = "") {
-  const cleaned = cleanForTrigger(text);
-  return KEYWORDS.some(k => cleaned.includes(k));
+  return KEYWORDS.some(k => cleanForTrigger(text).includes(k));
 }
 
 function normalizeText(text = "") {
-  return cleanForTrigger(text)
-    .replace(/https?:\/\/\S+/g, "")
-    .trim();
+  return cleanForTrigger(text).replace(/https?:\/\/\S+/g, "").trim();
 }
 
 function cleanCache() {
@@ -80,10 +72,7 @@ function cleanCache() {
 
 async function unshortUrl(url) {
   try {
-    const res = await axios.get(url, {
-      timeout: 5000,
-      maxRedirects: 5
-    });
+    const res = await axios.get(url, { timeout: 5000, maxRedirects: 5 });
     return res.request?.res?.responseUrl || url;
   } catch {
     return url;
@@ -110,7 +99,7 @@ function replaceTelegramLinks(text = "") {
   );
 
   await client.start();
-  console.log("✅ Telegram user connected");
+  console.log("✅ Telegram Connected");
 
   client.addEventHandler(async (event) => {
 
@@ -119,10 +108,7 @@ function replaceTelegramLinks(text = "") {
       const msg = event.message;
       if (!msg) return;
 
-      // 🚫 Ignore edited messages
       if (event.edit) return;
-
-      // 🚫 Ignore self messages
       if (msg.out) return;
 
       const chatId = Number(event.chatId);
@@ -130,81 +116,53 @@ function replaceTelegramLinks(text = "") {
 
       console.log("📩 Incoming from:", chatId);
 
-      // 🚫 NEVER process target chat (hard block)
+      // Never process target
       if (chatId === TARGET_CHAT) return;
 
-      // 🚫 Ignore except chats
       if (EXCEPT_CHATS.includes(chatId)) return;
 
       const rawText = msg.message || msg.text || "";
 
-      // 🚫 Ignore empty message
       if (!rawText && !msg.media) return;
 
-      // 🚫 Hard block converter bot loop
       if (rawText.includes("EarnKaro Converter")) return;
-
-      // 🚫 Block own channel mention
       if (rawText.includes("Lootdealtricky")) return;
 
-      // 🚫 Block forwarded messages (extra safety)
-      if (msg.fwdFrom) return;
-
-      // 🔒 Duplicate fingerprint protection
       const fingerprint = `${chatId}_${msg.id}`;
       if (processedMessages.has(fingerprint)) return;
       processedMessages.add(fingerprint);
 
-      // 🔥 Trigger detection (emoji/font safe)
       if (!hasKeyword(rawText)) return;
 
       cleanCache();
 
-      /* ---------- URL DUPLICATE BLOCK ---------- */
       const urls = rawText.match(/https?:\/\/\S+/gi) || [];
-
       for (const u of urls) {
         const finalUrl = await unshortUrl(u);
         if (urlCache.has(finalUrl)) return;
         urlCache.set(finalUrl, Date.now());
       }
 
-      /* ---------- TEXT DUPLICATE BLOCK ---------- */
       const normalizedTopic = normalizeText(rawText);
       if (textCache.has(normalizedTopic)) return;
       textCache.set(normalizedTopic, Date.now());
 
       let finalText = replaceTelegramLinks(rawText);
 
-      /* ---------- CAPTION LIMIT FIX ---------- */
       if (finalText.length > 1024)
         finalText = finalText.substring(0, 1020) + "...";
 
-      /* ================= SEND ================= */
+      /* ================= COPY METHOD ================= */
 
-      if (msg.media) {
+      await client.invoke({
+        _: "messages.copyMessages",
+        from_peer: msg.peerId,
+        id: [msg.id],
+        to_peer: TARGET_CHAT,
+        random_id: [BigInt(Date.now())]
+      });
 
-        const forwarded = await client.forwardMessages(
-          TARGET_CHAT,
-          { messages: [msg.id], fromPeer: chatId }
-        );
-
-        if (forwarded?.length && finalText !== rawText) {
-          await client.editMessage(TARGET_CHAT, {
-            message: forwarded[0].id,
-            text: finalText
-          });
-        }
-
-      } else {
-
-        await client.sendMessage(TARGET_CHAT, {
-          message: finalText
-        });
-
-      }
-
-      console.log("✅ Forwarded safely");
+      console.log("✅ Copied safely");
 
     } catch (err) {
       console.error("❌ Error:", err.message);
