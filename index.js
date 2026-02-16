@@ -112,99 +112,101 @@ function replaceTelegramLinks(text = "") {
   await client.start();
   console.log("✅ Telegram user connected");
 
-  client.addEventHandler(async (event) => {
+ client.addEventHandler(async (event) => {
 
-    try {
+  try {
 
-      const msg = event.message;
-      if (!msg || !msg.peerId) return;
+    const msg = event.message;
+    if (!msg) return;
 
-      // 🚫 Ignore edited messages completely
-      if (event.edit) return;
+    // 🚫 Ignore edits
+    if (event.edit) return;
 
-      // 🚫 Ignore self messages
-      if (msg.out) return;
+    // 🚫 Ignore self messages
+    if (msg.out) return;
 
-      // 🚫 Ignore forwarded messages (stops target poll loop)
-      if (msg.fwdFrom) return;
+    const chatId = Number(event.chatId);
+    if (!chatId) return;
 
-      const entity = await msg.getChat();
-      const chatId = Number(entity?.id);
-      if (!chatId) return;
+    console.log("📩 Incoming from:", chatId);
 
-      console.log("📩 Incoming from:", chatId);
+    // 🚫 Strictly ignore target
+    if (chatId === TARGET_CHAT) return;
 
-      // 🚫 STRICT: Never touch target group
-      if (chatId === TARGET_CHAT) return;
+    // 🚫 Ignore except list
+    if (EXCEPT_CHATS.includes(chatId)) return;
 
-      // 🚫 Ignore except chats
-      if (EXCEPT_CHATS.includes(chatId)) return;
+    const rawText = msg.message || msg.text || "";
 
-      // 🚫 Duplicate guard
-      const uniqueId = `${chatId}_${msg.id}`;
-      if (processedMessages.has(uniqueId)) return;
-      processedMessages.add(uniqueId);
+    // 🚫 Ignore empty messages
+    if (!rawText && !msg.media) return;
 
-      const rawText = msg.message || msg.text || "";
+    // 🚫 Block converter text
+    if (rawText.includes("EarnKaro Converter")) return;
 
-      // 🔥 Trigger check (emoji / font / case safe)
-      if (!hasKeyword(rawText)) return;
+    // 🚫 Block own channel link
+    if (rawText.includes("Lootdealtricky")) return;
 
-      cleanCache();
+    // 🔒 Duplicate fingerprint guard
+    const fingerprint = `${chatId}_${msg.id}`;
+    if (processedMessages.has(fingerprint)) return;
+    processedMessages.add(fingerprint);
 
-      /* ---------- URL DUPLICATE BLOCK ---------- */
-      const urls = rawText.match(/https?:\/\/\S+/gi) || [];
+    if (processedMessages.size > 5000)
+      processedMessages.clear();
 
-      for (const u of urls) {
-        const finalUrl = await unshortUrl(u);
-        if (urlCache.has(finalUrl)) return;
-        urlCache.set(finalUrl, Date.now());
-      }
+    // 🔥 Trigger word detection (emoji/font safe)
+    if (!hasKeyword(rawText)) return;
 
-      /* ---------- TEXT DUPLICATE BLOCK ---------- */
-      const normalizedTopic = normalizeText(rawText);
+    cleanCache();
 
-      if (textCache.has(normalizedTopic)) return;
-      textCache.set(normalizedTopic, Date.now());
+    /* ---------- URL DUPLICATE BLOCK ---------- */
+    const urls = rawText.match(/https?:\/\/\S+/gi) || [];
 
-      let finalText = replaceTelegramLinks(rawText);
-
-      /* ---------- CAPTION LIMIT FIX ---------- */
-      if (finalText.length > 1024)
-        finalText = finalText.substring(0, 1020) + "...";
-
-      /* ================= FORWARD ================= */
-      if (msg.media) {
-
-        const forwarded = await client.forwardMessages(
-          TARGET_CHAT,
-          {
-            messages: [msg.id],
-            fromPeer: entity
-          }
-        );
-
-        if (forwarded?.length && finalText !== rawText) {
-          await client.editMessage(TARGET_CHAT, {
-            message: forwarded[0].id,
-            text: finalText
-          });
-        }
-
-      } else {
-
-        await client.sendMessage(TARGET_CHAT, {
-          message: finalText
-        });
-
-      }
-
-      console.log("✅ Forwarded:", normalizedTopic.slice(0, 60));
-
-    } catch (err) {
-      console.error("❌ Error:", err.message);
+    for (const u of urls) {
+      const finalUrl = await unshortUrl(u);
+      if (urlCache.has(finalUrl)) return;
+      urlCache.set(finalUrl, Date.now());
     }
 
-  }, new NewMessage({ incoming: true }));
+    /* ---------- TEXT DUPLICATE BLOCK ---------- */
+    const normalizedTopic = normalizeText(rawText);
+    if (textCache.has(normalizedTopic)) return;
+    textCache.set(normalizedTopic, Date.now());
 
-})();
+    let finalText = replaceTelegramLinks(rawText);
+
+    if (finalText.length > 1024)
+      finalText = finalText.substring(0, 1020) + "...";
+
+    /* ================= SEND ================= */
+
+    if (msg.media) {
+
+      const forwarded = await client.forwardMessages(
+        TARGET_CHAT,
+        { messages: [msg.id], fromPeer: chatId }
+      );
+
+      if (forwarded?.length && finalText !== rawText) {
+        await client.editMessage(TARGET_CHAT, {
+          message: forwarded[0].id,
+          text: finalText
+        });
+      }
+
+    } else {
+
+      await client.sendMessage(TARGET_CHAT, {
+        message: finalText
+      });
+
+    }
+
+    console.log("✅ Forwarded");
+
+  } catch (err) {
+    console.error("❌ Error:", err.message);
+  }
+
+}, new NewMessage({}));
