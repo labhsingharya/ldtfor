@@ -102,8 +102,19 @@ function replaceTelegramLinks(text = "") {
   );
 
   await client.start();
+  console.log("✅ Telegram Connected");
+
+  /* 🔥 FORCE DIALOG SYNC (VERY IMPORTANT FOR CHANNELS) */
   await client.getDialogs({ limit: 500 });
-console.log("📡 Dialogs Synced");
+  console.log("📡 Dialogs Synced");
+
+  /* 🔥 PERIODIC SYNC (Fix broadcast delay issue) */
+  setInterval(async () => {
+    try {
+      await client.getDialogs({ limit: 200 });
+      console.log("🔄 Dialog Refresh");
+    } catch {}
+  }, 5 * 60 * 1000); // every 5 minutes
 
   client.addEventHandler(async (event) => {
 
@@ -133,14 +144,18 @@ console.log("📡 Dialogs Synced");
       console.log(`🆔 Chat ID: ${chatId}`);
       console.log(`📝 Preview: ${preview}`);
 
-      // 🚫 Never process target
+      if (msg.post === true) {
+        console.log("📢 Broadcast Channel Post");
+      }
+
+      // Never process target
       if (chatId === TARGET_CHAT) {
         console.log("⛔ Skipped (Target)");
         return;
       }
 
       if (EXCEPT_CHATS.includes(chatId)) {
-        console.log("⛔ Skipped (Except list)");
+        console.log("⛔ Skipped (Except)");
         return;
       }
 
@@ -155,7 +170,7 @@ console.log("📡 Dialogs Synced");
       }
 
       if (rawText.includes("Lootdealtricky")) {
-        console.log("⛔ Skipped (Own link)");
+        console.log("⛔ Skipped (Own Link)");
         return;
       }
 
@@ -197,7 +212,7 @@ console.log("📡 Dialogs Synced");
       if (finalText.length > 1024)
         finalText = finalText.substring(0, 1020) + "...";
 
-      /* ================= COPY ================= */
+      /* ================= COPY METHOD ================= */
 
       await client.invoke({
         _: "messages.copyMessages",
@@ -214,6 +229,6 @@ console.log("📡 Dialogs Synced");
       console.error("❌ Error:", err.message);
     }
 
-  }, new NewMessage({
-  incoming: true
-}));
+  }, new NewMessage({ incoming: true }));
+
+})();
