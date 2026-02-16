@@ -213,4 +213,6 @@ function replaceTelegramLinks(text = "") {
     console.error("❌ Error:", err.message);
   }
 
-}, new NewMessage({}));
+  }, new NewMessage({}));
+
+})();   // ← THIS LINE MUST EXIST
