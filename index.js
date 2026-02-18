@@ -19,12 +19,30 @@ const apiHash = process.env.API_HASH;
 const stringSession = new StringSession(process.env.SESSION_STRING);
 
 /* ================= CONFIG ================= */
+
+// 🎯 TARGET GROUP
 const TARGET_CHAT = -1001717159768;
 
-const EXCEPT_CHATS = [
-  -1001461215029,
-  -10011864904417,
-  -1002187363826
+// 🎯 SOURCE GROUPS / CHANNELS (CHANGE LATER)
+const SOURCE_CHATS = [
+  -1002104838072,
+  -1002392800902,
+  -1001495002618,
+  -1001486606418,
+  -1002466523687,
+  -1001175095956,
+  -1001193143102,
+  -1001450712440,
+  -1002139950066,
+  -1003222915238,
+  -1001921864192,
+  -1001749853075,
+  -1001600775522,
+  -1001837130426,
+  -1001707571730,
+  -1002158788262,
+  -1001315464303,
+  -1001420725892
 ];
 
 const KEYWORDS = ["loot", "fast", "grab", "steal", "buy max", "lowest"];
@@ -63,10 +81,13 @@ function normalizeText(text = "") {
 
 function cleanCache() {
   const now = Date.now();
+
   for (const [k, v] of urlCache)
     if (now - v > CACHE_TIME) urlCache.delete(k);
+
   for (const [k, v] of textCache)
     if (now - v > CACHE_TIME) textCache.delete(k);
+
   if (processedMessages.size > 5000)
     processedMessages.clear();
 }
@@ -106,27 +127,32 @@ function replaceTelegramLinks(text = "") {
   client.addEventHandler(async (event) => {
 
     try {
+
       const msg = event.message;
       if (!msg) return;
 
       const chatId = Number(event.chatId);
       if (!chatId) return;
 
-      // 🔒 HARD TARGET BLOCK
+      console.log("📩 From:", chatId);
+
+      // 🔒 HARD BLOCK TARGET
       if (chatId === TARGET_CHAT) return;
 
-      // Ignore self messages
+      // 🔒 ONLY ALLOW SOURCE LIST
+      if (!SOURCE_CHATS.includes(chatId)) return;
+
+      // 🔒 Ignore self messages
       if (msg.out) return;
 
-      // Ignore except list
-      if (EXCEPT_CHATS.includes(chatId)) return;
-
-      // Duplicate guard
+      // 🔒 Duplicate guard
       const uniqueId = `${chatId}_${msg.id}`;
       if (processedMessages.has(uniqueId)) return;
       processedMessages.add(uniqueId);
 
       const rawText = msg.message || msg.text || "";
+
+      // 🔥 Trigger safe (emoji / font / upper/lower)
       if (!hasKeyword(rawText)) return;
 
       cleanCache();
@@ -144,6 +170,7 @@ function replaceTelegramLinks(text = "") {
       textCache.set(normalizedTopic, Date.now());
 
       let finalText = replaceTelegramLinks(rawText);
+
       if (finalText.length > 1024)
         finalText = finalText.substring(0, 1020) + "...";
 
@@ -156,6 +183,12 @@ function replaceTelegramLinks(text = "") {
           caption: finalText || undefined
         });
 
+      } else if (msg.poll) {
+
+        await client.sendMessage(TARGET_CHAT, {
+          message: rawText
+        });
+
       } else {
 
         await client.sendMessage(TARGET_CHAT, {
@@ -164,12 +197,12 @@ function replaceTelegramLinks(text = "") {
 
       }
 
-      console.log("✅ Copied from:", chatId);
+      console.log("✅ Copied from source:", chatId);
 
     } catch (err) {
       console.error("❌ Error:", err.message);
     }
 
-  }, new NewMessage({ incoming: true }));
+  }, new NewMessage({}));
 
 })();
