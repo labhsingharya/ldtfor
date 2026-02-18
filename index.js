@@ -22,9 +22,7 @@ const stringSession = new StringSession(process.env.SESSION_STRING);
 const TARGET_CHAT = -1001717159768;
 
 const EXCEPT_CHATS = [
-  -1001778288856,
-  -1007738288255,
-  -1007882828866,
+  -1001461215029,
   -10011864904417
 ];
 
