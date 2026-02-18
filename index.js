@@ -109,7 +109,7 @@ function replaceTelegramLinks(text = "") {
     if (msg.out) return;
       
       // 🛠️ FIX: Peer ID को String में कन्वर्ट करना ज़रूरी है ताकि comparison सही हो
-      const chatId = event.message.peerId. thoseId || event.message.chatId?.toString();
+      
       const senderId = event.message.senderId?.toString();
 
       // 🔒 HARD BLOCK TARGET & SELF
