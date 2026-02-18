@@ -131,8 +131,10 @@ function replaceTelegramLinks(text = "") {
       const msg = event.message;
       if (!msg) return;
 
-      const chatId = Number(event.chatId);
-      if (!chatId) return;
+      const peer = await event.getChat();
+if (!peer) return;
+
+const chatId = Number(peer.id);
 
       console.log("📩 From:", chatId);
 
