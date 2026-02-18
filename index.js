@@ -89,17 +89,24 @@ function replaceTelegramLinks(text = "") {
   console.log("✅ Telegram user connected");
 
   client.addEventHandler(async (event) => {
-    try {
-      const msg = event.message;
-      if (!msg) return;
 
-      
-      const peer = await event.getChat();
-if (!peer) return;
+  try {
 
-const chatId = Number(peer.id);
+    const msg = event.message;
+    if (!msg) return;
 
-console.log("Incoming Chat:", chatId);
+    const peer = await event.getChat();
+    if (!peer) return;
+
+    const chatId = Number(peer.id);
+
+    console.log("📩 From:", chatId);
+
+    if (chatId === TARGET_CHAT) return;
+
+    if (!SOURCE_CHATS.includes(chatId)) return;
+
+    if (msg.out) return;
       
       // 🛠️ FIX: Peer ID को String में कन्वर्ट करना ज़रूरी है ताकि comparison सही हो
       const chatId = event.message.peerId. thoseId || event.message.chatId?.toString();
