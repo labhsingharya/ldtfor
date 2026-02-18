@@ -93,6 +93,14 @@ function replaceTelegramLinks(text = "") {
       const msg = event.message;
       if (!msg) return;
 
+      
+      const peer = await event.getChat();
+if (!peer) return;
+
+const chatId = Number(peer.id);
+
+console.log("Incoming Chat:", chatId);
+      
       // 🛠️ FIX: Peer ID को String में कन्वर्ट करना ज़रूरी है ताकि comparison सही हो
       const chatId = event.message.peerId. thoseId || event.message.chatId?.toString();
       const senderId = event.message.senderId?.toString();
