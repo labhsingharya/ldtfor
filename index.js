@@ -23,7 +23,8 @@ const TARGET_CHAT = -1001717159768;
 
 const EXCEPT_CHATS = [
   -1001461215029,
-  -10011864904417
+  -10011864904417,
+  -1002187363826
 ];
 
 const KEYWORDS = ["loot", "fast", "grab", "steal", "buy max", "lowest"];
