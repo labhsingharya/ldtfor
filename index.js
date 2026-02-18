@@ -4,17 +4,14 @@ import { NewMessage } from "telegram/events/index.js";
 import axios from "axios";
 import express from "express";
 
-/* ================= DUMMY SERVER ================= */
+/* ================= SERVER ================= */
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.get("/", (req, res) => {
-  res.send("Userbot Running");
-});
-
-app.listen(PORT, () => {
-  console.log("🌐 Dummy server running on port", PORT);
-});
+app.get("/", (req, res) => res.send("Userbot Running"));
+app.listen(PORT, () =>
+  console.log("🌐 Dummy server running on port", PORT)
+);
 
 /* ================= ENV ================= */
 const apiId = Number(process.env.API_ID);
@@ -27,7 +24,6 @@ const TARGET_CHAT = -1001717159768;
 const EXCEPT_CHATS = [
   -1001778288856,
   -1007738288255,
-  -1001717159768,
   -1007882828866,
   -10011864904417
 ];
@@ -68,14 +64,11 @@ function normalizeText(text = "") {
 
 function cleanCache() {
   const now = Date.now();
-
   for (const [k, v] of urlCache)
     if (now - v > CACHE_TIME) urlCache.delete(k);
-
   for (const [k, v] of textCache)
     if (now - v > CACHE_TIME) textCache.delete(k);
-
-  if (processedMessages.size > 3000)
+  if (processedMessages.size > 5000)
     processedMessages.clear();
 }
 
@@ -93,11 +86,9 @@ async function unshortUrl(url) {
 
 function replaceTelegramLinks(text = "") {
   const t = normalizeUnicodeFont(text);
-
   return t
     .replace(/https?:\/\/t\.me\/[^\s]+/gi, REPLACE_LINK)
-    .replace(/@[\w\d_]+/gi, REPLACE_LINK)
-    .replace(/loot\s*deal\s*tricky/gi, REPLACE_LINK);
+    .replace(/@[\w\d_]+/gi, REPLACE_LINK);
 }
 
 /* ================= START ================= */
@@ -117,73 +108,54 @@ function replaceTelegramLinks(text = "") {
 
     try {
       const msg = event.message;
-      if (!msg || !msg.peerId) return;
+      if (!msg) return;
 
-      // 🚫 Ignore self messages (loop protection)
-      if (msg.out) return;
-
-      const entity = await msg.getChat();
-      const chatId = Number(entity?.id);
+      const chatId = Number(event.chatId);
       if (!chatId) return;
 
-      console.log("📩 Incoming from:", chatId);
-
-      // 🚫 Ignore target group
+      // 🔒 HARD TARGET BLOCK
       if (chatId === TARGET_CHAT) return;
 
-      // 🚫 Ignore except chats
+      // Ignore self messages
+      if (msg.out) return;
+
+      // Ignore except list
       if (EXCEPT_CHATS.includes(chatId)) return;
 
-      // 🚫 Duplicate guard
+      // Duplicate guard
       const uniqueId = `${chatId}_${msg.id}`;
       if (processedMessages.has(uniqueId)) return;
       processedMessages.add(uniqueId);
 
       const rawText = msg.message || msg.text || "";
-
-      // 🔥 Trigger check (emoji / font safe / case safe)
       if (!hasKeyword(rawText)) return;
 
       cleanCache();
 
-      /* ---------- URL DUPLICATE BLOCK ---------- */
+      /* URL duplicate check */
       const urls = rawText.match(/https?:\/\/\S+/gi) || [];
-
       for (const u of urls) {
         const finalUrl = await unshortUrl(u);
         if (urlCache.has(finalUrl)) return;
         urlCache.set(finalUrl, Date.now());
       }
 
-      /* ---------- TEXT DUPLICATE BLOCK ---------- */
       const normalizedTopic = normalizeText(rawText);
-
       if (textCache.has(normalizedTopic)) return;
       textCache.set(normalizedTopic, Date.now());
 
       let finalText = replaceTelegramLinks(rawText);
-
-      /* ---------- CAPTION LIMIT FIX ---------- */
       if (finalText.length > 1024)
         finalText = finalText.substring(0, 1020) + "...";
 
-      /* ================= MEDIA ================= */
+      /* ================= COPY MODE ================= */
+
       if (msg.media) {
 
-        const forwarded = await client.forwardMessages(
-          TARGET_CHAT,
-          {
-            messages: [msg.id],
-            fromPeer: entity
-          }
-        );
-
-        if (forwarded?.length && finalText !== rawText) {
-          await client.editMessage(TARGET_CHAT, {
-            message: forwarded[0].id,
-            text: finalText
-          });
-        }
+        await client.sendFile(TARGET_CHAT, {
+          file: msg.media,
+          caption: finalText || undefined
+        });
 
       } else {
 
@@ -193,7 +165,7 @@ function replaceTelegramLinks(text = "") {
 
       }
 
-      console.log("✅ Forwarded:", normalizedTopic.slice(0, 60));
+      console.log("✅ Copied from:", chatId);
 
     } catch (err) {
       console.error("❌ Error:", err.message);
