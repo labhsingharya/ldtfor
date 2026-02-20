@@ -123,14 +123,16 @@ function replaceTelegramLinks(text = "") {
 
 (async () => {
   const client = new TelegramClient(
-    stringSession,
-    apiId,
-    apiHash,
-    { connectionRetries: 5 }
-  );
+  stringSession,
+  apiId,
+  apiHash,
+  { connectionRetries: 5 }
+);
 
-  await client.start();
-  console.log("✅ Telegram user connected");
+await client.connect();
+await client.getMe();   // 🔥 force update sync
+console.log("✅ Telegram user connected");
+console.log("🔁 Update loop active");
 
   client.addEventHandler(async (event) => {
     try {
