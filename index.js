@@ -3,19 +3,22 @@ import { StringSession } from "telegram/sessions/index.js";
 import { NewMessage } from "telegram/events/index.js";
 import express from "express";
 
-/* SERVER */
+/* ================= SERVER ================= */
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get("/", (_, res) => res.send("Userbot Running"));
 app.listen(PORT, () => console.log("🌐 Server running"));
 
-/* TELEGRAM */
+/* ================= TELEGRAM CONFIG ================= */
+
 const apiId = Number(process.env.API_ID);
 const apiHash = process.env.API_HASH;
 const stringSession = new StringSession(process.env.SESSION_STRING);
 
 const TARGET_CHAT = "-1001717159768";
+
 const SOURCE_CHATS = [
   "-1002104838072",
   "-1002392800902",
@@ -37,24 +40,23 @@ const SOURCE_CHATS = [
   "-1001420725892"
 ];
 
+/* ================= START ================= */
+
 (async () => {
 
   const client = new TelegramClient(
     stringSession,
     apiId,
     apiHash,
-    { connectionRetries: 5 }
+    {
+      connectionRetries: 5,
+      useWSS: false
+    }
   );
 
   await client.connect();
   console.log("✅ Connected");
-
-  /* FORCE UPDATE STATE SYNC */
-  await client.invoke({
-    _: "updates.getState"
-  });
-
-  console.log("🔁 Update state synced");
+  console.log("🔁 Waiting for messages...");
 
   client.addEventHandler(async (event) => {
 
@@ -66,24 +68,35 @@ const SOURCE_CHATS = [
 
     const chatId = peer.id.toString();
 
-    console.log("📩 From:", chatId);
+    console.log("📩 Received from:", chatId);
 
     if (!SOURCE_CHATS.includes(chatId)) return;
     if (chatId === TARGET_CHAT) return;
     if (msg.out) return;
 
-    if (msg.media) {
-      await client.sendFile(TARGET_CHAT, {
-        file: msg.media,
-        caption: msg.message || undefined
-      });
-    } else {
-      await client.sendMessage(TARGET_CHAT, {
-        message: msg.message || ""
-      });
-    }
+    try {
 
-    console.log("✅ Copied");
+      if (msg.media) {
+
+        await client.sendFile(TARGET_CHAT, {
+          file: msg.media,
+          caption: msg.message || undefined
+        });
+
+        console.log("✅ Media copied");
+
+      } else {
+
+        await client.sendMessage(TARGET_CHAT, {
+          message: msg.message || ""
+        });
+
+        console.log("✅ Text copied");
+      }
+
+    } catch (err) {
+      console.error("❌ Send error:", err.message);
+    }
 
   }, new NewMessage({}));
 
