@@ -8,7 +8,7 @@ import express from "express";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.get("/", (_, res) => res.send("Userbot Running"));
+app.get("/", (_, res) => res.send("Forwarder Running"));
 app.listen(PORT, () => console.log("🌐 Server running"));
 
 /* ================= TELEGRAM CONFIG ================= */
@@ -17,28 +17,13 @@ const apiId = Number(process.env.API_ID);
 const apiHash = process.env.API_HASH;
 const stringSession = new StringSession(process.env.SESSION_STRING);
 
-const TARGET_CHAT = "-1001717159768";
+/* ================= CHAT CONFIG ================= */
 
-const SOURCE_CHATS = [
-  "-1002104838072",
-  "-1002392800902",
-  "-1001495002618",
-  "-1001486606418",
-  "-1002466523687",
-  "-1001175095956",
-  "-1001193143102",
-  "-1001450712440",
-  "-1002139950066",
-  "-1003222915238",
-  "-1001921864192",
-  "-1001749853075",
-  "-1001600775522",
-  "-1001837130426",
-  "-1001707571730",
-  "-1002158788262",
-  "-1001315464303",
-  "-1001420725892"
-];
+// 👇 Test के लिए सिर्फ 1 source डालो
+const SOURCE_CHAT = "-1002625638849";
+
+// 👇 Target group
+const TARGET_CHAT = "-1001717159768";
 
 /* ================= START ================= */
 
@@ -48,54 +33,48 @@ const SOURCE_CHATS = [
     stringSession,
     apiId,
     apiHash,
-    {
-      connectionRetries: 5,
-      useWSS: false
-    }
+    { connectionRetries: 5 }
   );
 
   await client.connect();
-  console.log("✅ Connected");
+
+  console.log("✅ Telegram Connected");
   console.log("🔁 Waiting for messages...");
 
   client.addEventHandler(async (event) => {
 
-    const msg = event.message;
-    if (!msg) return;
-
-    const peer = await event.getChat();
-    if (!peer) return;
-
-    const chatId = peer.id.toString();
-
-    console.log("📩 Received from:", chatId);
-
-    if (!SOURCE_CHATS.includes(chatId)) return;
-    if (chatId === TARGET_CHAT) return;
-    if (msg.out) return;
-
     try {
 
-      if (msg.media) {
+      const msg = event.message;
+      if (!msg) return;
 
-        await client.sendFile(TARGET_CHAT, {
-          file: msg.media,
-          caption: msg.message || undefined
-        });
+      const peer = await event.getChat();
+      if (!peer) return;
 
-        console.log("✅ Media copied");
+      const chatId = peer.id.toString();
 
-      } else {
+      console.log("📩 Message from:", chatId);
 
-        await client.sendMessage(TARGET_CHAT, {
-          message: msg.message || ""
-        });
+      // ❌ Ignore everything except one source
+      if (chatId !== SOURCE_CHAT) return;
 
-        console.log("✅ Text copied");
-      }
+      // ❌ Ignore self messages
+      if (msg.out) return;
+
+      console.log("➡ Forwarding message...");
+
+      await client.forwardMessages(
+        TARGET_CHAT,
+        {
+          messages: [msg.id],
+          fromPeer: peer
+        }
+      );
+
+      console.log("✅ Forwarded successfully");
 
     } catch (err) {
-      console.error("❌ Send error:", err.message);
+      console.error("❌ Error:", err.message);
     }
 
   }, new NewMessage({}));
