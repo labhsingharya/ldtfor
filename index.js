@@ -3,26 +3,19 @@ import { StringSession } from "telegram/sessions/index.js";
 import { NewMessage } from "telegram/events/index.js";
 import express from "express";
 
-/* ================= SERVER ================= */
-
+/* SERVER */
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get("/", (_, res) => res.send("Userbot Running"));
-app.listen(PORT, () =>
-  console.log("🌐 Dummy server running on port", PORT)
-);
+app.listen(PORT, () => console.log("🌐 Server running"));
 
-/* ================= TELEGRAM CONFIG ================= */
-
+/* TELEGRAM */
 const apiId = Number(process.env.API_ID);
 const apiHash = process.env.API_HASH;
 const stringSession = new StringSession(process.env.SESSION_STRING);
 
-/* ================= CHAT CONFIG ================= */
-
 const TARGET_CHAT = "-1001717159768";
-
 const SOURCE_CHATS = [
   "-1002104838072",
   "-1002392800902",
@@ -44,8 +37,6 @@ const SOURCE_CHATS = [
   "-1001420725892"
 ];
 
-/* ================= START ================= */
-
 (async () => {
 
   const client = new TelegramClient(
@@ -55,71 +46,44 @@ const SOURCE_CHATS = [
     { connectionRetries: 5 }
   );
 
-  /* ===== CONNECT MODE ===== */
-
   await client.connect();
-  await client.getMe();   // force update sync
+  console.log("✅ Connected");
 
-  console.log("✅ Telegram connected");
-  console.log("🔁 Listening for messages...");
+  /* FORCE UPDATE STATE SYNC */
+  await client.invoke({
+    _: "updates.getState"
+  });
 
-  /* ================= HANDLER ================= */
+  console.log("🔁 Update state synced");
 
   client.addEventHandler(async (event) => {
 
-    try {
+    const msg = event.message;
+    if (!msg) return;
 
-      const msg = event.message;
-      if (!msg) return;
+    const peer = await event.getChat();
+    if (!peer) return;
 
-      const peer = await event.getChat();
-      if (!peer) return;
+    const chatId = peer.id.toString();
 
-      const chatId = peer.id.toString();
+    console.log("📩 From:", chatId);
 
-      console.log("📩 Incoming from:", chatId);
+    if (!SOURCE_CHATS.includes(chatId)) return;
+    if (chatId === TARGET_CHAT) return;
+    if (msg.out) return;
 
-      /* ===== HARD BLOCK TARGET ===== */
-      if (chatId === TARGET_CHAT) {
-        console.log("⛔ Target ignored");
-        return;
-      }
-
-      /* ===== ONLY ALLOW SOURCES ===== */
-      if (!SOURCE_CHATS.includes(chatId)) {
-        console.log("⛔ Not in source list");
-        return;
-      }
-
-      /* ===== IGNORE SELF ===== */
-      if (msg.out) {
-        console.log("⛔ Self message ignored");
-        return;
-      }
-
-      /* ===== COPY MODE ===== */
-
-      if (msg.media) {
-
-        await client.sendFile(TARGET_CHAT, {
-          file: msg.media,
-          caption: msg.message || undefined
-        });
-
-        console.log("✅ Media copied");
-
-      } else {
-
-        await client.sendMessage(TARGET_CHAT, {
-          message: msg.message || ""
-        });
-
-        console.log("✅ Text copied");
-      }
-
-    } catch (err) {
-      console.error("❌ Error:", err.message);
+    if (msg.media) {
+      await client.sendFile(TARGET_CHAT, {
+        file: msg.media,
+        caption: msg.message || undefined
+      });
+    } else {
+      await client.sendMessage(TARGET_CHAT, {
+        message: msg.message || ""
+      });
     }
+
+    console.log("✅ Copied");
 
   }, new NewMessage({}));
 
